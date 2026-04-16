@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Poiema Estoque PRO</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <style>
+    body { font-family: Arial; margin:0; background:#f5f6fa }
+    #app { display:none; padding:20px }
+    .card { background:#fff; padding:15px; border-radius:10px; margin:10px 0 }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap:10px }
+    button { margin:5px }
+  </style>
+</head>
+<body>
+
+<div id="screen-auth">
+  <h2>Login</h2>
+  <input id="login-email" placeholder="Email">
+  <input id="login-password" type="password" placeholder="Senha">
+  <button onclick="doLogin()">Entrar</button>
+  <p id="login-error" style="color:red"></p>
+</div>
+
+<div id="app">
+  <h1>Dashboard</h1>
+  <div class="grid">
+    <div class="card">Total Produtos: <b id="total-prod"></b></div>
+    <div class="card">Estoque Baixo: <b id="low-stock"></b></div>
+    <div class="card">Movimentações: <b id="total-mov"></b></div>
+  </div>
+
+  <h2>Produtos</h2>
+  <input id="filter-category" placeholder="Filtrar categoria" oninput="carregarProdutos()">
+  <ul id="lista-produtos"></ul>
+
+  <h2>Movimentações</h2>
+  <ul id="lista-mov"></ul>
+
+  <h2>Admin (Usuários)</h2>
+  <button onclick="carregarUsuarios()">Carregar usuários</button>
+  <ul id="lista-users"></ul>
+
+  <button onclick="logout()">Sair</button>
+</div>
+
+<script>
+const sb = supabase.createClient(
+  'https://lggbgqqnguoacuilbugm.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxnZ2JncXFuZ3VvYWN1aWxidWdtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4MzU3OTMsImV4cCI6MjA5MTQxMTc5M30.ma9mvlD4hZhXJheFbxEG5c9jvJahZ2_PAh2rWZnCa8k',
+  {
+    auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}
+  }
+)
+
+let currentUser, currentChurch, currentRole
+
+async function doLogin(){
+  const email = document.getElementById('login-email').value
+  const password = document.getElementById('login-password').value
+  const errorEl = document.getElementById('login-error')
+
+  errorEl.textContent = ''
+
+  const { data, error } = await sb.auth.signInWithPassword({ email, password })
+
+  if(error){
+    errorEl.textContent = error.message
+    return
+  }
+
+  enterApp(data.user)
+}
+
+async function enterApp(user){
+  currentUser=user
+
+  const {data:profile, error} = await sb
+    .from('profiles')
+    .select('*')
+    .eq('id',user.id)
+    .single()
+
+  if(error || !profile){
+    alert('Erro ao carregar perfil')
+    return
+  }
+
+  currentChurch=profile.church_id
+  currentRole=profile.role
+
+  document.getElementById('screen-auth').style.display='none'
+  document.getElementById('app').style.display='block'
+
+  dashboard()
+  carregarProdutos()
+  carregarMov()
+}
+
+async function dashboard(){
+  const {data:prod} = await sb.from('products').select('*').eq('church_id',currentChurch)
+  const {data:mov} = await sb.from('stock_movements').select('*').eq('church_id',currentChurch)
+
+  document.getElementById('total-prod').innerText = prod?.length || 0
+  document.getElementById('total-mov').innerText = mov?.length || 0
+  document.getElementById('low-stock').innerText = prod?.filter(p=>p.quantity<=p.min_stock).length || 0
+}
+
+async function carregarProdutos(){
+  let query = sb.from('products').select('*').eq('church_id',currentChurch)
+
+  const filtro = document.getElementById('filter-category').value
+
+  if(filtro){
+    query = query.ilike('category','%'+filtro+'%')
+  }
+
+  const {data} = await query
+
+  const lista = document.getElementById('lista-produtos')
+  lista.innerHTML=''
+
+  data?.forEach(p=>{
+    lista.innerHTML += `<li>${p.name} (${p.quantity})</li>`
+  })
+}
+
+async function carregarMov(){
+  const {data} = await sb
+    .from('stock_movements')
+    .select('*')
+    .eq('church_id',currentChurch)
+    .limit(20)
+
+  const lista = document.getElementById('lista-mov')
+  lista.innerHTML=''
+
+  data?.forEach(m=>{
+    lista.innerHTML += `<li>${m.type} - ${m.quantity}</li>`
+  })
+}
+
+async function carregarUsuarios(){
+  if(currentRole !== 'admin'){
+    alert('Sem permissão')
+    return
+  }
+
+  const {data} = await sb
+    .from('profiles')
+    .select('*')
+    .eq('church_id',currentChurch)
+
+  const lista = document.getElementById('lista-users')
+  lista.innerHTML=''
+
+  data?.forEach(u=>{
+    lista.innerHTML += `<li>${u.email} - ${u.role}</li>`
+  })
+}
+
+async function logout(){
+  await sb.auth.signOut()
+  location.reload()
+}
+
+// INIT
+(async()=>{
+  const {data} = await sb.auth.getSession()
+  if(data.session){
+    enterApp(data.session.user)
+  }
+})()
+</script>
+
+</body>
+</html>
